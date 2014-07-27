@@ -2,6 +2,7 @@
 
 #include "TutorialProject.h"
 #include "TutorialProjectCharacter.h"
+#include "BatteryPickup.h"
 
 //////////////////////////////////////////////////////////////////////////
 // ATutorialProjectCharacter
@@ -38,6 +39,15 @@ ATutorialProjectCharacter::ATutorialProjectCharacter(const class FPostConstructI
 	FollowCamera->AttachTo(CameraBoom, USpringArmComponent::SocketName); // Attach the camera to the end of the boom and let the boom adjust to match the controller orientation
 	FollowCamera->bUseControllerViewRotation = false; // Camera does not rotate relative to arm
 
+	PowerLevel = 2000.0f;
+	SpeedFactor = 0.75f;
+	BaseSpeed = 10.0f;
+
+	// create our battery collection volume
+	CollectionSphere = PCIP.CreateDefaultSubobject<USphereComponent>(this, TEXT("CollectionSphere"));
+	CollectionSphere->AttachTo(RootComponent);
+	CollectionSphere->SetSphereRadius(200.0f);
+
 	// Note: The skeletal mesh and anim blueprint references on the Mesh component (inherited from Character) 
 	// are set in the derived blueprint asset named MyCharacter (to avoid direct content references in C++)
 }
@@ -50,6 +60,7 @@ void ATutorialProjectCharacter::SetupPlayerInputComponent(class UInputComponent*
 	// Set up gameplay key bindings
 	check(InputComponent);
 	InputComponent->BindAction("Jump", IE_Pressed, this, &ACharacter::Jump);
+	InputComponent->BindAction("CollectPickups", IE_Pressed, this, &ATutorialProjectCharacter::CollectBatteries);
 
 	InputComponent->BindAxis("MoveForward", this, &ATutorialProjectCharacter::MoveForward);
 	InputComponent->BindAxis("MoveRight", this, &ATutorialProjectCharacter::MoveRight);
@@ -115,4 +126,48 @@ void ATutorialProjectCharacter::MoveRight(float Value)
 		// add movement in that direction
 		AddMovementInput(Direction, Value);
 	}
+}
+
+void ATutorialProjectCharacter::CollectBatteries()
+{
+	float BatteryPower = 0.0f;
+
+	// get all overlapping Actors and store them in a CollectedActors array
+	TArray<AActor*> CollectedActors;
+	CollectionSphere->GetOverlappingActors(CollectedActors);
+
+	// filter out batteries
+	for (int32 iCollected = 0; iCollected < CollectedActors.Num(); ++iCollected)
+	{
+		// cast actor to ABatteryPickup
+		ABatteryPickup* const TestBattery = Cast<ABatteryPickup>(CollectedActors[iCollected]);
+
+		// check if cast successful, and battery is valid and active
+		if (TestBattery && !TestBattery->IsPendingKill() && TestBattery->bIsActive)
+		{
+			// yes, so drain power from it
+
+			// store battery power for adding to character's power
+			BatteryPower = BatteryPower + TestBattery->PowerLevel;
+
+			// call battery's OnPickedUp function
+			TestBattery->OnPickedUp();
+
+			// deactivate battery
+			TestBattery->bIsActive = false;
+		}
+	}
+
+	if (BatteryPower > 0.0f)
+	{
+		// call blueprinted implementation of PowerUp with total battery power as input
+		PowerUp(BatteryPower);
+	}
+}
+
+void ATutorialProjectCharacter::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	CharacterMovement->MaxWalkSpeed = SpeedFactor * PowerLevel + BaseSpeed;
+
 }
